@@ -1,4 +1,6 @@
 # memory_store.py
+import gc
+
 class ClauseMemory:
     def __init__(self):
         self.clauses = []
@@ -11,6 +13,11 @@ class ClauseMemory:
 
     def is_empty(self):
         return len(self.clauses) == 0
+    
+    def clear(self):
+        """Clear stored clauses to free memory"""
+        self.clauses = []
+        gc.collect()
 
 
 clause_memory = ClauseMemory()

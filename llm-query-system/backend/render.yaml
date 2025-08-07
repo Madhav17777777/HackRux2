@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: llm-query-system
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: MAX_PDF_PAGES
+        value: 30
+      - key: MAX_QUESTIONS
+        value: 5
+      - key: MEMORY_LIMIT_MB
+        value: 400
+      - key: PYTHONHASHSEED
+        value: random
+      - key: PYTHONDONTWRITEBYTECODE
+        value: 1
+    healthCheckPath: /health
+    autoDeploy: true
