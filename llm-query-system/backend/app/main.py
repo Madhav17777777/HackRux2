@@ -81,11 +81,17 @@ async def run_pipeline(request: QueryRequest):
 
         answers = []
 
-        # Step 3: Process each question
+        # Step 3: Process each question with better memory management
         for i, question in enumerate(request.questions):
             print(f"❓ Processing question {i+1}/{len(request.questions)}: {question}")
             
             try:
+                # Check memory before processing each question
+                if not check_memory_limit(MEMORY_LIMIT_MB):
+                    print("⚠️ Memory limit reached, stopping processing")
+                    answers.append("Service temporarily unavailable due to high memory usage")
+                    break
+                
                 relevant_clauses = retrieve_clauses(question)
                 if not relevant_clauses:
                     answers.append("No relevant clauses found.")
@@ -94,14 +100,14 @@ async def run_pipeline(request: QueryRequest):
                 decision = evaluate_decision(question, relevant_clauses)
                 answers.append(decision.get("justification", "No answer available."))
                 
-                # Clean up after each question
+                # Aggressive cleanup after each question
                 del relevant_clauses
+                del decision
                 gc.collect()
                 
-                # Check memory after each question
-                if not check_memory_limit(MEMORY_LIMIT_MB):
-                    print("⚠️ Memory limit reached, stopping processing")
-                    break
+                # Force memory cleanup every 3 questions
+                if (i + 1) % 3 == 0:
+                    force_memory_cleanup()
                 
             except Exception as e:
                 print(f"❌ Error processing question {i+1}: {e}")

@@ -9,11 +9,11 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: MAX_PDF_PAGES
-        value: 30
+        value: 50
       - key: MAX_QUESTIONS
-        value: 5
+        value: 10
       - key: MEMORY_LIMIT_MB
-        value: 400
+        value: 450
       - key: PYTHONHASHSEED
         value: random
       - key: PYTHONDONTWRITEBYTECODE

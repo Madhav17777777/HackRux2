@@ -3,6 +3,7 @@ from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
 from app.memory_store import clause_memory
+from app.utils import get_memory_usage
 import gc
 
 # Lazy loading - model will be loaded only when first used
@@ -32,7 +33,7 @@ def embed_and_store(chunks):
         index = get_index()
         
         # Process in smaller batches to reduce memory usage
-        batch_size = 50
+        batch_size = 25  # Reduced batch size for better memory management
         all_embeddings = []
         
         for i in range(0, len(chunks), batch_size):
@@ -42,6 +43,13 @@ def embed_and_store(chunks):
             
             # Force garbage collection after each batch
             gc.collect()
+            
+            # Check memory limit during processing
+            if i > 0 and i % 100 == 0:  # Check every 100 chunks
+                memory = get_memory_usage()
+                if memory['rss_mb'] > 400:  # Hard limit during processing
+                    print("⚠️ Memory limit reached during embedding, truncating")
+                    break
         
         # Combine all embeddings
         embeddings = np.vstack(all_embeddings)
