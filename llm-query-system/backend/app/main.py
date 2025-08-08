@@ -1,6 +1,7 @@
 # ---------- main.py ----------
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from app.ingest import load_and_split_documents
 from app.embeddings import embed_and_store, cleanup_embeddings
@@ -10,7 +11,6 @@ from app.memory_store import clause_memory
 from app.utils import log_memory_usage, check_memory_limit, force_memory_cleanup, optimize_memory_settings
 import uvicorn
 import gc
-import os
 import itertools
 
 # Optimize memory for container limits
@@ -28,11 +28,11 @@ app.add_middleware(
 )
 
 class QueryRequest(BaseModel):
-    documents: str  # PDF path or raw base64
+    documents: str  # PDF file path or base64 string
     questions: list[str]
 
-# --- CONFIG ---
-SAFE_MEMORY_MB = 500  # Near Render free-tier limit (512MB)
+# Render Free Tier Safe Memory Limit
+SAFE_MEMORY_MB = 500  # keep below 512 MB
 
 @app.middleware("http")
 async def memory_cleanup_middleware(request, call_next):
@@ -47,15 +47,10 @@ async def run_pipeline(request: QueryRequest):
     try:
         log_memory_usage("Pipeline Start")
 
-        # Step 1: Load document lazily
-        # No hard limit, but we will process in batches to avoid memory spikes
-        pages_iter = load_and_split_documents(request.documents, stream_mode=True)  # <-- needs stream mode in ingest
-        print("📄 Document loaded in streaming mode.")
-
         answers = []
-        page_batch_size = 5  # Small chunks to stay under memory cap
+        page_batch_size = 5  # process in small chunks to avoid memory spikes
 
-        # Process questions one by one
+        # Process each question independently
         for q_index, question in enumerate(request.questions, start=1):
             print(f"❓ Question {q_index}/{len(request.questions)}: {question}")
 
@@ -65,24 +60,24 @@ async def run_pipeline(request: QueryRequest):
 
             relevant_clauses_accum = []
 
-            # Step 2: Go through doc pages in batches, embed, search, discard
-            batch_number = 0
-            for batch in iter(lambda: list(itertools.islice(pages_iter, page_batch_size)), []):
-                batch_number += 1
+            # Create a fresh iterator for every question
+            pages_iter = load_and_split_documents(request.documents, stream_mode=True)
+
+            # Process document in batches
+            for batch_number, batch in enumerate(iter(lambda: list(itertools.islice(pages_iter, page_batch_size)), []), start=1):
                 if not batch:
                     break
 
-                embed_and_store(batch)  # store batch in FAISS
+                embed_and_store(batch)
                 clauses = retrieve_clauses(question)
                 if clauses:
                     relevant_clauses_accum.extend(clauses)
 
-                # Free FAISS batch before next
+                # Clear embeddings to free RAM
                 cleanup_embeddings()
                 clause_memory.clear()
                 gc.collect()
 
-                # Extra cleanup if memory high
                 if not check_memory_limit(SAFE_MEMORY_MB - 50):
                     print("⚠️ Memory high, breaking batch loop.")
                     break
@@ -91,11 +86,10 @@ async def run_pipeline(request: QueryRequest):
                 answers.append("No relevant clauses found.")
                 continue
 
-            # Step 3: Evaluate decision
             decision = evaluate_decision(question, relevant_clauses_accum)
             answers.append(decision.get("justification", "No answer available."))
 
-            # Clean up after each question
+            # Cleanup after each question
             del relevant_clauses_accum
             del decision
             gc.collect()
@@ -107,11 +101,12 @@ async def run_pipeline(request: QueryRequest):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         cleanup_embeddings()
         clause_memory.clear()
         gc.collect()
-        raise HTTPException(status_code=500, detail=str(e))
-
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/health")
 async def health_check():

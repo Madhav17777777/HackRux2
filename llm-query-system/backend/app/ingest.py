@@ -1,63 +1,34 @@
-# ingest.py
-import fitz  # PyMuPDF
-import requests
+# ---------- app/ingest.py ----------
+import base64
 import io
-import gc
+import pdfplumber
 
-def load_and_split_documents(pdf_url, max_pages=None):
-    print("📥 Downloading PDF from:", pdf_url)
+def load_and_split_documents(doc_input, stream_mode=False):
+    """
+    Load PDF pages. If stream_mode=True, yield pages one-by-one (low memory).
+    doc_input can be a file path or base64 string.
+    """
+    if isinstance(doc_input, str) and doc_input.strip().startswith("%PDF-"):
+        # Raw PDF text input — unlikely but handle
+        pdf_bytes = io.BytesIO(doc_input.encode("latin1"))
+    elif isinstance(doc_input, str) and not doc_input.lower().endswith(".pdf"):
+        # Base64 input
+        pdf_bytes = io.BytesIO(base64.b64decode(doc_input))
+    else:
+        # File path
+        pdf_bytes = open(doc_input, "rb")
 
-    try:
-        response = requests.get(pdf_url, timeout=30)
-        if response.status_code != 200:
-            raise Exception("Failed to download PDF")
-
-        # Use stream to avoid loading entire PDF into memory at once
-        doc = fitz.open(stream=io.BytesIO(response.content), filetype="pdf")
-        
-        # Limit pages if specified to prevent memory issues
-        if max_pages and len(doc) > max_pages:
-            print(f"⚠️ PDF has {len(doc)} pages, limiting to {max_pages}")
-            pages_to_process = max_pages
-        else:
-            pages_to_process = len(doc)
-
+    if stream_mode:
+        with pdfplumber.open(pdf_bytes) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    yield text
+    else:
         pages = []
-        # Process pages in smaller batches
-        batch_size = 10
-        
-        for i in range(0, pages_to_process, batch_size):
-            batch_end = min(i + batch_size, pages_to_process)
-            batch_pages = []
-            
-            for j in range(i, batch_end):
-                page = doc[j]
-                text = page.get_text()
-                # Clean and truncate text to reduce memory usage
-                text = text.strip()[:5000]  # Limit to 5000 chars per page
-                if text:  # Only add non-empty pages
-                    batch_pages.append(text)
-                
-                # Clean up page object
-                del page
-            
-            pages.extend(batch_pages)
-            
-            # Force garbage collection after each batch
-            gc.collect()
-
-        doc.close()
-        
-        # Clean up response content
-        del response.content
-        gc.collect()
-
-        print("📄 Extracted", len(pages), "pages from PDF.")
+        with pdfplumber.open(pdf_bytes) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    pages.append(text)
         return pages
-        
-    except Exception as e:
-        print(f"❌ Error loading PDF: {e}")
-        raise
-    finally:
-        # Ensure cleanup
-        gc.collect()
